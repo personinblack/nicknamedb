@@ -1,7 +1,4 @@
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
-}
+mod document;
+pub use document::{Document, KV};
+mod serenity;
+pub use crate::serenity::{get, NicknameDb, SerenityInit};
