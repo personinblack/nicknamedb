@@ -46,7 +46,7 @@ impl Document {
         Self {
             name,
             prefix,
-            regex: Regex::new(r"(\^(?:\w)(?:\w+)){1}").expect("regex"),
+            regex: Regex::new(r"(\^(?:\w)(?:[^\^\s]+)){1}").expect("regex"),
             last_access: Arc::new(Mutex::new(Utc::now())),
         }
     }
