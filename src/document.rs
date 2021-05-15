@@ -1,37 +1,9 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::{DateTime, Duration, Utc};
 use futures::lock::Mutex;
 use regex::Regex;
-
-pub struct KV {
-    key: char,
-    value: String,
-}
-
-impl ToString for KV {
-    fn to_string(&self) -> String {
-        format!("{}{}", self.key, self.value)
-    }
-}
-
-impl From<String> for KV {
-    fn from(mut serialized: String) -> Self {
-        Self {
-            key: serialized.remove(0),
-            value: serialized,
-        }
-    }
-}
-
-impl Clone for KV {
-    fn clone(&self) -> Self {
-        Self {
-            key: self.key,
-            value: self.value.clone(),
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct Document {
@@ -53,41 +25,9 @@ impl Document {
 
     pub async fn insert<T: Into<String>>(&mut self, key: char, value: T) {
         *self.last_access.lock().await = Utc::now();
-        if self.exists(key) {
-            return;
-        }
 
-        let mut kv_chain = self.fetch_all().unwrap_or_else(Vec::new);
-        kv_chain.push(KV {
-            key,
-            value: value.into(),
-        });
-
-        self.push_kv(kv_chain);
-    }
-
-    pub async fn update<T: Into<String>>(&mut self, key: char, value: T) {
-        *self.last_access.lock().await = Utc::now();
-        if !self.exists(key) {
-            return;
-        }
-
-        let value = value.into();
-        let kv_chain = self
-            .fetch_all()
-            .unwrap()
-            .iter()
-            .map(|kv| {
-                if kv.key == key {
-                    KV {
-                        key,
-                        value: value.clone(),
-                    }
-                } else {
-                    kv.clone()
-                }
-            })
-            .collect::<Vec<KV>>();
+        let mut kv_chain = self.fetch_all().unwrap_or_else(HashMap::new);
+        kv_chain.insert(key, value.into());
 
         self.push_kv(kv_chain);
     }
@@ -102,11 +42,10 @@ impl Document {
             .fetch_all()
             .unwrap()
             .iter()
-            .cloned()
             .filter(|kv| {
-                if kv.key == key {
+                if *kv.0 == key {
                     if let Some(value) = value.clone() {
-                        return kv.value != value.into();
+                        return *kv.1 != value.into();
                     }
 
                     return false;
@@ -114,7 +53,8 @@ impl Document {
 
                 true
             })
-            .collect::<Vec<KV>>();
+            .map(|kv| (*kv.0, kv.1.clone()))
+            .collect::<HashMap<_, _>>();
 
         self.push_kv(kv_chain);
     }
@@ -148,7 +88,7 @@ impl Document {
         Utc::now() - *self.last_access.lock().await
     }
 
-    fn fetch_all(&self) -> Option<Vec<KV>> {
+    fn fetch_all(&self) -> Option<HashMap<char, String>> {
         let nick = &self.name;
         if !self.regex.is_match(&nick) {
             return None;
@@ -161,16 +101,16 @@ impl Document {
                     let mut kv = mat.as_str().to_string();
                     kv.remove(0);
                     let key = kv.remove(0);
-                    KV { key, value: kv }
+                    (key, kv)
                 })
-                .collect::<Vec<KV>>(),
+                .collect::<HashMap<_, _>>(),
         )
     }
 
-    fn push_kv(&mut self, kv: Vec<KV>) {
+    fn push_kv(&mut self, kv: HashMap<char, String>) {
         let kv_string = kv
             .iter()
-            .map(|kv| "^".to_owned() + &kv.to_string())
+            .map(|kv| "^".to_owned() + &kv.0.to_string() + kv.1)
             .collect::<String>();
 
         let name_current = &self.name;
@@ -191,16 +131,6 @@ mod tests {
         document.insert('A', "FOO").await;
         document.insert('b', "BAR").await;
         assert_eq!(document.name, "menfie ^AFOO^bBAR");
-    }
-
-    #[tokio::test]
-    async fn update() {
-        let mut document = Document::new("menfie".to_owned(), '^');
-        document.insert('A', "FOO").await;
-        document.insert('b', "BAR").await;
-        document.update('A', "BAZ").await;
-        document.update('b', "FOO").await;
-        assert_eq!(document.name, "menfie ^ABAZ^bFOO");
     }
 
     #[tokio::test]
